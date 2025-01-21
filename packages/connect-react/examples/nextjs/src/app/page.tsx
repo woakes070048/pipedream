@@ -21,6 +21,15 @@ export default function Home() {
     text: "hello slack!",
   });
 
+  const [
+    dynamicPropsId,
+    setDynamicPropsId,
+  ] = useState<string | undefined>();
+
+  const handleDynamicProps = (dynamicProps: { id: string | undefined }) => {
+    setDynamicPropsId(dynamicProps.id)
+  }
+
   return (
     <>
       <div>My application</div>
@@ -29,7 +38,20 @@ export default function Home() {
           userId={userId}
           componentKey="slack-send-message"
           configuredProps={configuredProps}
+          onUpdateDynamicProps={handleDynamicProps}
           onUpdateConfiguredProps={setConfiguredProps}
+          onSubmit={async () => {
+            try {
+              await client.actionRun({
+                userId,
+                actionId: "slack-send-message",
+                configuredProps,
+                dynamicPropsId,
+              });
+            } catch (error) {
+              console.error("Action run failed:", error);
+            }
+          }}
         />
       </FrontendClientProvider>
     </>
