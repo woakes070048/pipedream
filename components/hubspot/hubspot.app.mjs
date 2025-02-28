@@ -13,6 +13,12 @@ import {
   DEFAULT_PRODUCT_PROPERTIES,
   DEFAULT_LINE_ITEM_PROPERTIES,
 } from "./common/constants.mjs";
+import Bottleneck from "bottleneck";
+const limiter = new Bottleneck({
+  minTime: 250, // 4 requests per second
+  maxConcurrent: 1,
+});
+const axiosRateLimiter = limiter.wrap(axios);
 
 export default {
   type: "app",
@@ -82,7 +88,7 @@ export default {
         if (includeCustom) {
           const { results } = await this.listSchemas();
           const customObjects = results?.map(({
-            name: value, labels,
+            fullyQualifiedName: value, labels,
           }) => ({
             value,
             label: labels.plural,
@@ -431,10 +437,15 @@ export default {
     customObjectType: {
       type: "string",
       label: "Custom Object Type",
-      description: "Tye type of custom object to create",
+      description: "The type of custom object to create",
       async options() {
         const { results } = await this.listSchemas();
-        return results?.map(({ name }) => name ) || [];
+        return results?.map(({
+          name, fullyQualifiedName,
+        }) => ({
+          label: name,
+          value: fullyQualifiedName,
+        }) ) || [];
       },
     },
   },
@@ -445,15 +456,39 @@ export default {
         "Content-Type": "application/json",
       };
     },
+    // Recursively trim string values in accordance with Hubspot's validation rules
+    // https://developers.hubspot.com/changelog/breaking-change-enhanced-validations-for-non-string-properties-in-hubspots-crmobject-apis
+    trimStringValues(obj) {
+      if (typeof obj === "string") {
+        return obj.trim();
+      } else if (Array.isArray(obj)) {
+        return obj.map(this.trimStringValues);
+      } else if (obj !== null && typeof obj === "object") {
+        return Object.fromEntries(
+          Object.entries(obj).map(([
+            key,
+            value,
+          ]) => [
+            key,
+            this.trimStringValues(value),
+          ]),
+        );
+      }
+      return obj;
+    },
     makeRequest({
       $ = this,
       api,
       endpoint,
+      data,
+      params,
       ...otherOpts
     }) {
-      return axios($, {
+      return axiosRateLimiter($, {
         url: `${BASE_URL}${api}${endpoint}`,
         headers: this._getHeaders(),
+        data: data && this.trimStringValues(data),
+        params: params && this.trimStringValues(params),
         ...otherOpts,
       });
     },
@@ -981,6 +1016,20 @@ export default {
         api: API_PATH.CRMV3,
         endpoint: `/objects/${objectType}/batch/read`,
         method: "POST",
+        ...opts,
+      });
+    },
+    listNotes(opts = {}) {
+      return this.makeRequest({
+        api: API_PATH.CRMV3,
+        endpoint: "/objects/notes",
+        ...opts,
+      });
+    },
+    listTasks(opts = {}) {
+      return this.makeRequest({
+        api: API_PATH.CRMV3,
+        endpoint: "/objects/tasks",
         ...opts,
       });
     },
